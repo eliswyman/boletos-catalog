@@ -67,6 +67,9 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 
 - Confirm `approve_submission` / `reject_submission` and RLS on `token_type_submissions`,
   `user_collection_items`, and `boleto-photos` verify the caller server-side (not just `ADMIN_UID` in JS).
+  Draft target state in `sql/rls_and_authz.sql` (admins table + `is_admin()`, per-table policies,
+  column-level update grants, admin-checked approve/reject, storage policies). **Not deployed** — it was
+  written without seeing the live policies/RPC bodies; run its audit section first.
 - Writes are still not truly atomic (rollback is best-effort client-side). Draft fix in
   `sql/atomic_writes.sql` (`submit_new_token_type`, `withdraw_collection_item`; SECURITY INVOKER, uses
   `auth.uid()`). **Not yet deployed or wired into the client** — review/verify column names, run in
