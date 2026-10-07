@@ -63,6 +63,7 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 - `submitAsNew` deletes the submission if the collection-item insert fails (warns if cleanup also fails).
 - Withdraw/delete checks the error on each delete.
 - Quantity is validated by `readQuantity()` (empty → 1; must be a whole number ≥ 0, else toast `invalidQuantity`). The DB should also enforce this with a CHECK constraint on `user_collection_items.quantity`.
+- Client wired to the atomic RPCs with a missing-function fallback (see Known issues).
 - All `alert()` calls replaced by `showToast()` (`#toast`, `aria-live`, auto-dismiss); all `confirm()` calls replaced by `confirmDialog()`.
 
 ## Known issues / next steps
@@ -72,8 +73,9 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
   Draft target state in `sql/rls_and_authz.sql` (admins table + `is_admin()`, per-table policies,
   column-level update grants, admin-checked approve/reject, storage policies). **Not deployed** — it was
   written without seeing the live policies/RPC bodies; run its audit section first.
-- Writes are still not truly atomic (rollback is best-effort client-side). Draft fix in
-  `sql/atomic_writes.sql` (`submit_new_token_type`, `withdraw_collection_item`; SECURITY INVOKER, uses
-  `auth.uid()`). **Not yet deployed or wired into the client** — review/verify column names, run in
-  Supabase, then switch `submitAsNew` and `#btn-delete` to call the RPCs and drop the client rollback.
+- Atomic writes: the client now calls `submit_new_token_type` and `withdraw_collection_item`
+  (`sql/atomic_writes.sql`, **draft — deploy it**). If the RPC doesn't exist yet (`isMissingRpc`:
+  PGRST202/42883) it falls back to the old non-atomic path (`submitAsNew` → `submitAsNewLegacy`,
+  `withdrawLegacy`). Once the SQL is deployed everywhere, delete the legacy functions and their TODOs,
+  and the `rollbackFailed` string.
 - Supabase JS is pinned to `2.117.3` (jsDelivr, no SRI hash yet — add `integrity`/`crossorigin` after computing the hash from a machine that can reach the CDN). Bump deliberately and re-test.

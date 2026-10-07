@@ -1393,17 +1393,38 @@ function readQuantity() {
   return Number.isInteger(n) && n >= 0 ? n : null;
 }
 
+// PostgREST / Postgres codes for "function doesn't exist" — i.e. sql/atomic_writes.sql isn't deployed yet.
+function isMissingRpc(error) {
+  return !!error && (error.code === "PGRST202" || error.code === "42883");
+}
+
 async function submitAsNew(fields, quantity) {
   const submissionId = currentDraftId || crypto.randomUUID();
-  const payload = Object.assign({}, fields, {
-    id: submissionId,
-    submitted_by: currentUser.id,
-    status: "pending",
+  const photos = {
     photo_obverse_path: photoData.obversePath || null,
     photo_reverse_path: photoData.reversePath || null
+  };
+  const { error } = await sb.rpc("submit_new_token_type", {
+    p_submission: Object.assign({}, fields, photos, { id: submissionId }),
+    p_quantity: quantity
+  });
+  if (error && !isMissingRpc(error)) { showToast(error.message); return; }
+  // TODO: remove the fallback once sql/atomic_writes.sql is deployed everywhere.
+  if (error && !(await submitAsNewLegacy(submissionId, fields, photos, quantity))) return;
+  closeModal();
+  closeMatchOverlay();
+  await setView("mine");
+}
+
+// Non-atomic fallback: two inserts with a best-effort client-side rollback.
+async function submitAsNewLegacy(submissionId, fields, photos, quantity) {
+  const payload = Object.assign({}, fields, photos, {
+    id: submissionId,
+    submitted_by: currentUser.id,
+    status: "pending"
   });
   const { error: subError } = await sb.from("token_type_submissions").insert(payload);
-  if (subError) { showToast(subError.message); return; }
+  if (subError) { showToast(subError.message); return false; }
   const { error: itemError } = await sb.from("user_collection_items").insert({
     user_id: currentUser.id,
     submission_id: submissionId,
@@ -1412,11 +1433,9 @@ async function submitAsNew(fields, quantity) {
   if (itemError) {
     const { error: rollbackError } = await sb.from("token_type_submissions").delete().eq("id", submissionId);
     showToast(rollbackError ? t("rollbackFailed") + "\n" + itemError.message : itemError.message, "error", 12000);
-    return;
+    return false;
   }
-  closeModal();
-  closeMatchOverlay();
-  await setView("mine");
+  return true;
 }
 
 async function linkToExisting(tokenTypeId, quantity, personalNotes) {
@@ -1494,16 +1513,25 @@ document.getElementById("record-form").addEventListener("submit", async function
   else if (modalMode === "edit-mine") await handleEditMineSubmit();
 });
 
+// Non-atomic fallback: delete the item, then (if still pending) its submission.
+async function withdrawLegacy(record) {
+  const { error: itemErr } = await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
+  if (itemErr) { showToast(itemErr.message); return false; }
+  if (record.pending && record.submissionId) {
+    const { error: subErr } = await sb.from("token_type_submissions").delete().eq("id", record.submissionId);
+    if (subErr) { showToast(subErr.message); await setView("mine"); return false; }
+  }
+  return true;
+}
+
 document.getElementById("btn-delete").addEventListener("click", async function () {
   const record = activeRecord;
   if (!record) return;
   if (!(await confirmDialog(record.pending ? t("confirmWithdraw") : t("confirmDelete"), record.pending ? t("withdraw") : t("delete")))) return;
-  const { error: itemErr } = await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
-  if (itemErr) { showToast(itemErr.message); return; }
-  if (record.pending && record.submissionId) {
-    const { error: subErr } = await sb.from("token_type_submissions").delete().eq("id", record.submissionId);
-    if (subErr) { showToast(subErr.message); await setView("mine"); return; }
-  }
+  const { error } = await sb.rpc("withdraw_collection_item", { p_item_id: record.collectionItemId });
+  if (error && !isMissingRpc(error)) { showToast(error.message); return; }
+  // TODO: remove the fallback once sql/atomic_writes.sql is deployed everywhere.
+  if (error && !(await withdrawLegacy(record))) return;
   closeModal();
   await setView("mine");
 });
