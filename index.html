@@ -649,6 +649,8 @@ const translations = {
     rejectedBadge: "Not added to the master catalog",
     mineEmptyState: "You haven't added any tokens to your collection yet.",
     reviewEmptyState: "No submissions waiting for review.",
+    loadError: "Couldn't load data. Please try again.",
+    rollbackFailed: "Your submission was saved but couldn't be added to your collection, and cleanup failed. Please contact the admin.",
     signInRequired: "Sign in to build your own collection.",
     authErrorGeneric: "Something went wrong. Check your email and password and try again.",
     signUpCheckEmail: "Check your email to confirm your account, then sign in.",
@@ -731,6 +733,8 @@ const translations = {
     rejectedBadge: "No se agregó al catálogo maestro",
     mineEmptyState: "Aún no has agregado boletos a tu colección.",
     reviewEmptyState: "No hay envíos pendientes de revisión.",
+    loadError: "No se pudieron cargar los datos. Inténtalo de nuevo.",
+    rollbackFailed: "Tu envío se guardó pero no se pudo agregar a tu colección, y la limpieza falló. Contacta al administrador.",
     signInRequired: "Inicia sesión para crear tu propia colección.",
     authErrorGeneric: "Algo salió mal. Revisa tu correo y contraseña e intenta de nuevo.",
     signUpCheckEmail: "Revisa tu correo para confirmar tu cuenta y luego inicia sesión.",
@@ -899,6 +903,7 @@ let currentUser = null;
 let isAdmin = false;
 let currentView = "catalog";
 let records = [];
+let loadError = false;
 let photoData = { obverse: null, reverse: null };
 let currentDraftId = null;
 let matchCandidates = [];
@@ -986,19 +991,22 @@ function normalizeCollectionItem(item) {
 
 const VIEW_LOADERS = {
   catalog: async function () {
-    const { data } = await sb.from("token_types").select("*").order("hacienda_name");
+    const { data, error } = await sb.from("token_types").select("*").order("hacienda_name");
+    if (error) throw error;
     records = (data || []).map(normalizeTokenType);
   },
   mine: async function () {
     if (!currentUser) { records = []; return; }
-    const { data } = await sb.from("user_collection_items")
+    const { data, error } = await sb.from("user_collection_items")
       .select("*, token_types(*), token_type_submissions(*)")
       .eq("user_id", currentUser.id);
+    if (error) throw error;
     records = (data || []).map(normalizeCollectionItem);
   },
   review: async function () {
     if (!isAdmin) { records = []; return; }
-    const { data } = await sb.from("token_type_submissions").select("*").eq("status", "pending").order("created_at");
+    const { data, error } = await sb.from("token_type_submissions").select("*").eq("status", "pending").order("created_at");
+    if (error) throw error;
     records = (data || []).map(normalizeSubmission);
   }
 };
@@ -1011,7 +1019,14 @@ async function setView(view) {
   document.getElementById("stats").style.display = view === "review" ? "none" : "grid";
   document.getElementById("btn-add").style.display = (view === "mine" && currentUser) ? "inline-block" : "none";
   document.getElementById("search").value = "";
-  await VIEW_LOADERS[view]();
+  loadError = false;
+  try {
+    await VIEW_LOADERS[view]();
+  } catch (err) {
+    console.error(err);
+    records = [];
+    loadError = true;
+  }
   render();
 }
 
@@ -1308,7 +1323,11 @@ async function submitAsNew(fields, quantity) {
     submission_id: submissionId,
     quantity: quantity
   });
-  if (itemError) { alert(itemError.message); return; }
+  if (itemError) {
+    const { error: rollbackError } = await sb.from("token_type_submissions").delete().eq("id", submissionId);
+    alert(rollbackError ? t("rollbackFailed") + "\n" + itemError.message : itemError.message);
+    return;
+  }
   closeModal();
   closeMatchOverlay();
   await setView("mine");
@@ -1391,9 +1410,11 @@ document.getElementById("btn-delete").addEventListener("click", async function (
   const record = activeRecord;
   if (!record) return;
   if (!confirm(record.pending ? t("confirmWithdraw") : t("confirmDelete"))) return;
-  await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
+  const { error: itemErr } = await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
+  if (itemErr) { alert(itemErr.message); return; }
   if (record.pending && record.submissionId) {
-    await sb.from("token_type_submissions").delete().eq("id", record.submissionId);
+    const { error: subErr } = await sb.from("token_type_submissions").delete().eq("id", record.submissionId);
+    if (subErr) { alert(subErr.message); await setView("mine"); return; }
   }
   closeModal();
   await setView("mine");
@@ -1513,7 +1534,7 @@ function render() {
   const emptyText = document.getElementById("empty-state-text");
 
   if (records.length === 0) {
-    emptyText.textContent = currentView === "mine" ? t("mineEmptyState") : currentView === "review" ? t("reviewEmptyState") : t("emptyState");
+    emptyText.textContent = loadError ? t("loadError") : currentView === "mine" ? t("mineEmptyState") : currentView === "review" ? t("reviewEmptyState") : t("emptyState");
     emptyState.style.display = "block";
     grid.innerHTML = "";
     return;

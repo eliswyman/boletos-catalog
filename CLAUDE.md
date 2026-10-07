@@ -55,11 +55,10 @@ CSS + vanilla JS, no build step, no framework).
 
 Initial commit `e03086a` (2026-07-14).
 
-**Pending (Session 2 changes, NOT yet in `index.html`):** the code from that session was lost,
-so these still need to be (re)implemented:
-- View loaders should surface Supabase errors instead of silently showing an empty list.
-- `submitAsNew` should roll back the submission if the collection-item insert fails.
-- Withdraw/delete should check errors on each delete instead of ignoring them.
+Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
+- View loaders throw on Supabase errors; `setView` sets `loadError` and `render()` shows the localized message.
+- `submitAsNew` deletes the submission if the collection-item insert fails (warns if cleanup also fails).
+- Withdraw/delete checks the error on each delete.
 
 ## Known issues / next steps
 
