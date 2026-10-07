@@ -46,7 +46,8 @@ CSS + vanilla JS, no build step, no framework).
 - No test suite or build/lint tooling currently exists.
 - **Error handling conventions:** view loaders in `VIEW_LOADERS` throw on Supabase errors;
   `setView` catches, sets `loadError`, and `render()` shows the localized `loadError`
-  message in the empty-state area. Multi-step writes check each `error` result.
+  message in the empty-state area. Multi-step writes check each `error` result and report failures with `showToast(msg, kind, duration)`
+  (non-blocking `#toast`; kind `"error"` default or `"info"`) — don't use `alert()`.
 - **i18n:** add every new user-facing string to *both* `en` and `es` in `translations`.
 - No `.env`/config file — Supabase URL and anon key are hardcoded constants near the
   top of the `<script>` block.
@@ -61,10 +62,13 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 - Withdraw/delete checks the error on each delete.
 - Quantity is validated by `readQuantity()` (empty → 1; must be a whole number ≥ 0, else alert `invalidQuantity`). The DB should also enforce this with a CHECK constraint on `user_collection_items.quantity`.
 
+- All `alert()` calls replaced by `showToast()` (`#toast`, `aria-live`, auto-dismiss).
+
 ## Known issues / next steps
 
 - Confirm `approve_submission` / `reject_submission` and RLS on `token_type_submissions`,
   `user_collection_items`, and `boleto-photos` verify the caller server-side (not just `ADMIN_UID` in JS).
 - Writes are still not truly atomic (rollback is best-effort client-side). Proper fix:
   a Supabase RPC that inserts submission + collection item in one transaction, and one for withdraw.
-- Errors are shown with `alert()`; Supabase JS is loaded from unpinned `@2`.
+- Supabase JS is loaded from unpinned `@2`.
+- Destructive confirmations still use the native `confirm()` (withdraw/delete/reject).

@@ -171,6 +171,15 @@
     z-index: 100;
   }
   .overlay.open { display: flex; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    max-width: min(480px, calc(100% - 32px)); padding: 12px 16px;
+    background: var(--text-primary); color: #fff; border-radius: var(--radius);
+    font-size: 14px; white-space: pre-line; z-index: 200;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2); display: none;
+  }
+  #toast.show { display: block; }
+  #toast.error { background: var(--danger); }
   .modal {
     background: var(--surface);
     border-radius: 12px;
@@ -563,6 +572,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<div id="toast" role="status" aria-live="polite"></div>
+
 <script>
 const SUPABASE_URL = "https://azcxjupcdiqihpebzxed.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_D-tianWsCO9XYZja_zAPZQ_wsHBwag5";
@@ -747,6 +758,17 @@ const translations = {
 };
 
 let lang = localStorage.getItem(LANG_KEY) || (navigator.language && navigator.language.toLowerCase().indexOf("es") === 0 ? "es" : "en");
+
+let toastTimer = null;
+// Non-blocking replacement for alert(). kind: "error" (default) or "info".
+function showToast(message, kind, duration) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.className = "show" + (kind === "info" ? "" : " error");
+  el.setAttribute("role", kind === "info" ? "status" : "alert");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { el.className = ""; }, duration || 6000);
+}
 
 function t(key) {
   return translations[lang][key] != null ? translations[lang][key] : translations.en[key];
@@ -1067,17 +1089,17 @@ document.getElementById("auth-form").addEventListener("submit", async function (
   const email = document.getElementById("auth-email").value.trim();
   const password = document.getElementById("auth-password").value;
   const { error } = await sb.auth.signInWithPassword({ email: email, password: password });
-  if (error) { alert(t("authErrorGeneric")); return; }
+  if (error) { showToast(t("authErrorGeneric")); return; }
   document.getElementById("auth-form").reset();
 });
 
 document.getElementById("btn-sign-up").addEventListener("click", async function () {
   const email = document.getElementById("auth-email").value.trim();
   const password = document.getElementById("auth-password").value;
-  if (!email || !password) { alert(t("authErrorGeneric")); return; }
+  if (!email || !password) { showToast(t("authErrorGeneric")); return; }
   const { error } = await sb.auth.signUp({ email: email, password: password });
-  if (error) { alert(t("authErrorGeneric")); return; }
-  alert(t("signUpCheckEmail"));
+  if (error) { showToast(t("authErrorGeneric")); return; }
+  showToast(t("signUpCheckEmail"), "info");
   document.getElementById("auth-form").reset();
 });
 
@@ -1327,7 +1349,7 @@ async function submitAsNew(fields, quantity) {
     photo_reverse_path: photoData.reversePath || null
   });
   const { error: subError } = await sb.from("token_type_submissions").insert(payload);
-  if (subError) { alert(subError.message); return; }
+  if (subError) { showToast(subError.message); return; }
   const { error: itemError } = await sb.from("user_collection_items").insert({
     user_id: currentUser.id,
     submission_id: submissionId,
@@ -1335,7 +1357,7 @@ async function submitAsNew(fields, quantity) {
   });
   if (itemError) {
     const { error: rollbackError } = await sb.from("token_type_submissions").delete().eq("id", submissionId);
-    alert(rollbackError ? t("rollbackFailed") + "\n" + itemError.message : itemError.message);
+    showToast(rollbackError ? t("rollbackFailed") + "\n" + itemError.message : itemError.message, "error", 12000);
     return;
   }
   closeModal();
@@ -1350,7 +1372,7 @@ async function linkToExisting(tokenTypeId, quantity, personalNotes) {
     quantity: quantity,
     personal_notes: personalNotes || null
   });
-  if (error) { alert(error.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   closeMatchOverlay();
   await setView("mine");
@@ -1381,7 +1403,7 @@ function showMatchOverlay(candidates, draftFields, quantity) {
 async function handleAddSubmit() {
   const fields = readFormFields();
   const quantity = readQuantity();
-  if (quantity === null) { alert(t("invalidQuantity")); return; }
+  if (quantity === null) { showToast(t("invalidQuantity")); return; }
   const query = [fields.hacienda_name, fields.denomination, fields.material].filter(Boolean).join(" ");
   const { data: matches } = await sb.rpc("match_token_types", { query: query });
   if (matches && matches.length) {
@@ -1394,19 +1416,19 @@ async function handleAddSubmit() {
 async function handleEditMineSubmit() {
   const record = activeRecord;
   const quantity = readQuantity();
-  if (quantity === null) { alert(t("invalidQuantity")); return; }
+  if (quantity === null) { showToast(t("invalidQuantity")); return; }
   if (record.pending) {
     const fields = readFormFields();
     if (photoData.obversePath) fields.photo_obverse_path = photoData.obversePath;
     if (photoData.reversePath) fields.photo_reverse_path = photoData.reversePath;
     const { error: subErr } = await sb.from("token_type_submissions").update(fields).eq("id", record.submissionId);
-    if (subErr) { alert(subErr.message); return; }
+    if (subErr) { showToast(subErr.message); return; }
     const { error: itemErr } = await sb.from("user_collection_items").update({ quantity: quantity }).eq("id", record.collectionItemId);
-    if (itemErr) { alert(itemErr.message); return; }
+    if (itemErr) { showToast(itemErr.message); return; }
   } else {
     const personalNotes = document.getElementById("notes").value.trim();
     const { error } = await sb.from("user_collection_items").update({ quantity: quantity, personal_notes: personalNotes }).eq("id", record.collectionItemId);
-    if (error) { alert(error.message); return; }
+    if (error) { showToast(error.message); return; }
   }
   closeModal();
   await setView("mine");
@@ -1423,10 +1445,10 @@ document.getElementById("btn-delete").addEventListener("click", async function (
   if (!record) return;
   if (!confirm(record.pending ? t("confirmWithdraw") : t("confirmDelete"))) return;
   const { error: itemErr } = await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
-  if (itemErr) { alert(itemErr.message); return; }
+  if (itemErr) { showToast(itemErr.message); return; }
   if (record.pending && record.submissionId) {
     const { error: subErr } = await sb.from("token_type_submissions").delete().eq("id", record.submissionId);
-    if (subErr) { alert(subErr.message); await setView("mine"); return; }
+    if (subErr) { showToast(subErr.message); await setView("mine"); return; }
   }
   closeModal();
   await setView("mine");
@@ -1437,7 +1459,7 @@ document.getElementById("btn-approve").addEventListener("click", async function 
   if (!record) return;
   const overrides = readFormFields();
   const { error } = await sb.rpc("approve_submission", { p_submission_id: record.id, overrides: overrides });
-  if (error) { alert(error.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   await setView("review");
   await refreshReviewBadge();
@@ -1449,7 +1471,7 @@ document.getElementById("btn-reject").addEventListener("click", async function (
   if (!confirm(t("confirmReject"))) return;
   const note = document.getElementById("review-note").value.trim();
   const { error } = await sb.rpc("reject_submission", { p_submission_id: record.id, p_note: note || null });
-  if (error) { alert(error.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   await setView("review");
   await refreshReviewBadge();
