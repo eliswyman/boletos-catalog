@@ -69,5 +69,5 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
   `user_collection_items`, and `boleto-photos` verify the caller server-side (not just `ADMIN_UID` in JS).
 - Writes are still not truly atomic (rollback is best-effort client-side). Proper fix:
   a Supabase RPC that inserts submission + collection item in one transaction, and one for withdraw.
-- Supabase JS is loaded from unpinned `@2`.
+- Supabase JS is pinned to `2.117.3` (jsDelivr, no SRI hash yet — add `integrity`/`crossorigin` after computing the hash from a machine that can reach the CDN). Bump deliberately and re-test.
 - Destructive confirmations still use the native `confirm()` (withdraw/delete/reject).
