@@ -67,7 +67,9 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 
 - Confirm `approve_submission` / `reject_submission` and RLS on `token_type_submissions`,
   `user_collection_items`, and `boleto-photos` verify the caller server-side (not just `ADMIN_UID` in JS).
-- Writes are still not truly atomic (rollback is best-effort client-side). Proper fix:
-  a Supabase RPC that inserts submission + collection item in one transaction, and one for withdraw.
+- Writes are still not truly atomic (rollback is best-effort client-side). Draft fix in
+  `sql/atomic_writes.sql` (`submit_new_token_type`, `withdraw_collection_item`; SECURITY INVOKER, uses
+  `auth.uid()`). **Not yet deployed or wired into the client** — review/verify column names, run in
+  Supabase, then switch `submitAsNew` and `#btn-delete` to call the RPCs and drop the client rollback.
 - Supabase JS is pinned to `2.117.3` (jsDelivr, no SRI hash yet — add `integrity`/`crossorigin` after computing the hash from a machine that can reach the CDN). Bump deliberately and re-test.
 - Destructive confirmations still use the native `confirm()` (withdraw/delete/reject).
