@@ -46,7 +46,7 @@ CSS + vanilla JS, no build step, no framework).
 - No test suite or build/lint tooling currently exists.
 - **Error handling conventions:** view loaders in `VIEW_LOADERS` throw on Supabase errors;
   `setView` catches, sets `loadError`, and `render()` shows the localized `loadError`
-  message in the empty-state area. Multi-step writes check each `error` result and report failures with `showToast(msg, kind, duration)`
+  message in the empty-state area. Writes check the `error` result and report failures with `showToast(msg, kind, duration)`
   (non-blocking `#toast`; kind `"error"` default or `"info"`) — don't use `alert()`.
   Destructive confirmations use `await confirmDialog(message, confirmLabel)` (`#confirm-overlay`;
   resolves true/false; Escape/backdrop cancel, focus starts on Cancel) — don't use `confirm()`.
@@ -60,10 +60,8 @@ Initial commit `e03086a` (2026-07-14).
 
 Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 - View loaders throw on Supabase errors; `setView` sets `loadError` and `render()` shows the localized message.
-- `submitAsNew` deletes the submission if the collection-item insert fails (warns if cleanup also fails).
-- Withdraw/delete checks the error on each delete.
+- Adding a new token and withdraw/delete are single atomic RPC calls (`submit_new_token_type`, `withdraw_collection_item`); the old client-side rollback/fallback code was removed.
 - Quantity is validated by `readQuantity()` (empty → 1; must be a whole number ≥ 0, else toast `invalidQuantity`). The DB should also enforce this with a CHECK constraint on `user_collection_items.quantity`.
-- Client wired to the atomic RPCs with a missing-function fallback (see Known issues).
 - All `alert()` calls replaced by `showToast()` (`#toast`, `aria-live`, auto-dismiss); all `confirm()` calls replaced by `confirmDialog()`.
 
 ## Known issues / next steps
@@ -73,9 +71,7 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
   Draft target state in `sql/rls_and_authz.sql` (admins table + `is_admin()`, per-table policies,
   column-level update grants, admin-checked approve/reject, storage policies). **Not deployed** — it was
   written without seeing the live policies/RPC bodies; run its audit section first.
-- Atomic writes: the client now calls `submit_new_token_type` and `withdraw_collection_item`
-  (`sql/atomic_writes.sql`, **draft — deploy it**). If the RPC doesn't exist yet (`isMissingRpc`:
-  PGRST202/42883) it falls back to the old non-atomic path (`submitAsNew` → `submitAsNewLegacy`,
-  `withdrawLegacy`). Once the SQL is deployed everywhere, delete the legacy functions and their TODOs,
-  and the `rollbackFailed` string.
+- **Requires `sql/atomic_writes.sql` to be deployed:** `submitAsNew` and the delete/withdraw handler call
+  the `submit_new_token_type` / `withdraw_collection_item` RPCs with no fallback. Without the functions in
+  Supabase, adding and withdrawing tokens fails with an error toast.
 - Supabase JS is pinned to `2.117.3` (jsDelivr, no SRI hash yet — add `integrity`/`crossorigin` after computing the hash from a machine that can reach the CDN). Bump deliberately and re-test.
