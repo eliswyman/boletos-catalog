@@ -59,6 +59,7 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 - View loaders throw on Supabase errors; `setView` sets `loadError` and `render()` shows the localized message.
 - `submitAsNew` deletes the submission if the collection-item insert fails (warns if cleanup also fails).
 - Withdraw/delete checks the error on each delete.
+- Quantity is validated by `readQuantity()` (empty → 1; must be a whole number ≥ 0, else alert `invalidQuantity`). The DB should also enforce this with a CHECK constraint on `user_collection_items.quantity`.
 
 ## Known issues / next steps
 
@@ -66,5 +67,4 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
   `user_collection_items`, and `boleto-photos` verify the caller server-side (not just `ADMIN_UID` in JS).
 - Writes are still not truly atomic (rollback is best-effort client-side). Proper fix:
   a Supabase RPC that inserts submission + collection item in one transaction, and one for withdraw.
-- Quantity input uses `parseInt` with no validation (can be `NaN` or negative).
 - Errors are shown with `alert()`; Supabase JS is loaded from unpinned `@2`.

@@ -457,7 +457,7 @@
         <div class="field-row full" id="quantity-row">
           <div>
             <label for="quantity" data-i18n="labelQuantity">Quantity owned</label>
-            <input type="number" id="quantity" min="0" value="1" style="max-width:120px;" />
+            <input type="number" id="quantity" min="0" step="1" value="1" style="max-width:120px;" />
           </div>
         </div>
       </fieldset>
@@ -649,6 +649,7 @@ const translations = {
     rejectedBadge: "Not added to the master catalog",
     mineEmptyState: "You haven't added any tokens to your collection yet.",
     reviewEmptyState: "No submissions waiting for review.",
+    invalidQuantity: "Quantity must be a whole number, 0 or more.",
     loadError: "Couldn't load data. Please try again.",
     rollbackFailed: "Your submission was saved but couldn't be added to your collection, and cleanup failed. Please contact the admin.",
     signInRequired: "Sign in to build your own collection.",
@@ -733,6 +734,7 @@ const translations = {
     rejectedBadge: "No se agregó al catálogo maestro",
     mineEmptyState: "Aún no has agregado boletos a tu colección.",
     reviewEmptyState: "No hay envíos pendientes de revisión.",
+    invalidQuantity: "La cantidad debe ser un número entero, 0 o más.",
     loadError: "No se pudieron cargar los datos. Inténtalo de nuevo.",
     rollbackFailed: "Tu envío se guardó pero no se pudo agregar a tu colección, y la limpieza falló. Contacta al administrador.",
     signInRequired: "Inicia sesión para crear tu propia colección.",
@@ -1307,6 +1309,14 @@ function readFormFields() {
   };
 }
 
+// Empty input defaults to 1; returns null for anything that isn't a whole number >= 0.
+function readQuantity() {
+  const raw = document.getElementById("quantity").value.trim();
+  if (raw === "") return 1;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 async function submitAsNew(fields, quantity) {
   const submissionId = currentDraftId || crypto.randomUUID();
   const payload = Object.assign({}, fields, {
@@ -1370,7 +1380,8 @@ function showMatchOverlay(candidates, draftFields, quantity) {
 
 async function handleAddSubmit() {
   const fields = readFormFields();
-  const quantity = document.getElementById("quantity").value ? parseInt(document.getElementById("quantity").value, 10) : 1;
+  const quantity = readQuantity();
+  if (quantity === null) { alert(t("invalidQuantity")); return; }
   const query = [fields.hacienda_name, fields.denomination, fields.material].filter(Boolean).join(" ");
   const { data: matches } = await sb.rpc("match_token_types", { query: query });
   if (matches && matches.length) {
@@ -1382,7 +1393,8 @@ async function handleAddSubmit() {
 
 async function handleEditMineSubmit() {
   const record = activeRecord;
-  const quantity = document.getElementById("quantity").value ? parseInt(document.getElementById("quantity").value, 10) : 1;
+  const quantity = readQuantity();
+  if (quantity === null) { alert(t("invalidQuantity")); return; }
   if (record.pending) {
     const fields = readFormFields();
     if (photoData.obversePath) fields.photo_obverse_path = photoData.obversePath;
