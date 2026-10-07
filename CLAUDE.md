@@ -48,6 +48,8 @@ CSS + vanilla JS, no build step, no framework).
   `setView` catches, sets `loadError`, and `render()` shows the localized `loadError`
   message in the empty-state area. Multi-step writes check each `error` result and report failures with `showToast(msg, kind, duration)`
   (non-blocking `#toast`; kind `"error"` default or `"info"`) — don't use `alert()`.
+  Destructive confirmations use `await confirmDialog(message, confirmLabel)` (`#confirm-overlay`;
+  resolves true/false; Escape/backdrop cancel, focus starts on Cancel) — don't use `confirm()`.
 - **i18n:** add every new user-facing string to *both* `en` and `es` in `translations`.
 - No `.env`/config file — Supabase URL and anon key are hardcoded constants near the
   top of the `<script>` block.
@@ -61,7 +63,7 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
 - `submitAsNew` deletes the submission if the collection-item insert fails (warns if cleanup also fails).
 - Withdraw/delete checks the error on each delete.
 - Quantity is validated by `readQuantity()` (empty → 1; must be a whole number ≥ 0, else toast `invalidQuantity`). The DB should also enforce this with a CHECK constraint on `user_collection_items.quantity`.
-- All `alert()` calls replaced by `showToast()` (`#toast`, `aria-live`, auto-dismiss).
+- All `alert()` calls replaced by `showToast()` (`#toast`, `aria-live`, auto-dismiss); all `confirm()` calls replaced by `confirmDialog()`.
 
 ## Known issues / next steps
 
@@ -75,4 +77,3 @@ Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
   `auth.uid()`). **Not yet deployed or wired into the client** — review/verify column names, run in
   Supabase, then switch `submitAsNew` and `#btn-delete` to call the RPCs and drop the client rollback.
 - Supabase JS is pinned to `2.117.3` (jsDelivr, no SRI hash yet — add `integrity`/`crossorigin` after computing the hash from a machine that can reach the CDN). Bump deliberately and re-test.
-- Destructive confirmations still use the native `confirm()` (withdraw/delete/reject).

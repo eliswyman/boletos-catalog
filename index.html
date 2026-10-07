@@ -171,6 +171,10 @@
     z-index: 100;
   }
   .overlay.open { display: flex; }
+  #confirm-overlay { align-items: center; z-index: 150; }
+  #confirm-overlay .modal { max-width: 420px; }
+  #confirm-overlay .modal-actions { justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  #confirm-message { margin: 0; font-size: 15px; }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     max-width: min(480px, calc(100% - 32px)); padding: 12px 16px;
@@ -572,6 +576,16 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+<div class="overlay" id="confirm-overlay">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-describedby="confirm-message">
+    <p id="confirm-message"></p>
+    <div class="modal-actions">
+      <button type="button" id="confirm-cancel" data-i18n="cancel">Cancel</button>
+      <button type="button" id="confirm-ok" class="danger"></button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -666,6 +680,7 @@ const translations = {
     signInRequired: "Sign in to build your own collection.",
     authErrorGeneric: "Something went wrong. Check your email and password and try again.",
     signUpCheckEmail: "Check your email to confirm your account, then sign in.",
+    withdraw: "Withdraw",
     confirmWithdraw: "Withdraw this submission from your collection?",
     confirmReject: "Reject this submission?",
     labelPersonalNotes: "Personal notes (only you see this)"
@@ -751,6 +766,7 @@ const translations = {
     signInRequired: "Inicia sesión para crear tu propia colección.",
     authErrorGeneric: "Algo salió mal. Revisa tu correo y contraseña e intenta de nuevo.",
     signUpCheckEmail: "Revisa tu correo para confirmar tu cuenta y luego inicia sesión.",
+    withdraw: "Retirar",
     confirmWithdraw: "¿Retirar este envío de tu colección?",
     confirmReject: "¿Rechazar este envío?",
     labelPersonalNotes: "Notas personales (solo tú las ves)"
@@ -758,6 +774,44 @@ const translations = {
 };
 
 let lang = localStorage.getItem(LANG_KEY) || (navigator.language && navigator.language.toLowerCase().indexOf("es") === 0 ? "es" : "en");
+
+// Promise-based replacement for confirm(). Resolves true on confirm, false on cancel/Escape/backdrop.
+// Focus starts on Cancel since every caller is destructive.
+function confirmDialog(message, confirmLabel) {
+  const overlay = document.getElementById("confirm-overlay");
+  const okBtn = document.getElementById("confirm-ok");
+  const cancelBtn = document.getElementById("confirm-cancel");
+  const previousFocus = document.activeElement;
+  document.getElementById("confirm-message").textContent = message;
+  okBtn.textContent = confirmLabel;
+  overlay.classList.add("open");
+  cancelBtn.focus();
+  return new Promise(function (resolve) {
+    function finish(result) {
+      overlay.classList.remove("open");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey, true);
+      if (previousFocus && previousFocus.focus) previousFocus.focus();
+      resolve(result);
+    }
+    function onOk() { finish(true); }
+    function onCancel() { finish(false); }
+    function onBackdrop(e) { if (e.target === overlay) finish(false); }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === "Tab") {
+        e.preventDefault();
+        (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+      }
+    }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    overlay.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey, true);
+  });
+}
 
 let toastTimer = null;
 // Non-blocking replacement for alert(). kind: "error" (default) or "info".
@@ -1443,7 +1497,7 @@ document.getElementById("record-form").addEventListener("submit", async function
 document.getElementById("btn-delete").addEventListener("click", async function () {
   const record = activeRecord;
   if (!record) return;
-  if (!confirm(record.pending ? t("confirmWithdraw") : t("confirmDelete"))) return;
+  if (!(await confirmDialog(record.pending ? t("confirmWithdraw") : t("confirmDelete"), record.pending ? t("withdraw") : t("delete")))) return;
   const { error: itemErr } = await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
   if (itemErr) { showToast(itemErr.message); return; }
   if (record.pending && record.submissionId) {
@@ -1468,7 +1522,7 @@ document.getElementById("btn-approve").addEventListener("click", async function 
 document.getElementById("btn-reject").addEventListener("click", async function () {
   const record = activeRecord;
   if (!record) return;
-  if (!confirm(t("confirmReject"))) return;
+  if (!(await confirmDialog(t("confirmReject"), t("reject")))) return;
   const note = document.getElementById("review-note").value.trim();
   const { error } = await sb.rpc("reject_submission", { p_submission_id: record.id, p_note: note || null });
   if (error) { showToast(error.message); return; }
