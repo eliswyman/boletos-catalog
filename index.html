@@ -171,6 +171,19 @@
     z-index: 100;
   }
   .overlay.open { display: flex; }
+  #confirm-overlay { align-items: center; z-index: 150; }
+  #confirm-overlay .modal { max-width: 420px; }
+  #confirm-overlay .modal-actions { justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  #confirm-message { margin: 0; font-size: 15px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    max-width: min(480px, calc(100% - 32px)); padding: 12px 16px;
+    background: var(--text-primary); color: #fff; border-radius: var(--radius);
+    font-size: 14px; white-space: pre-line; z-index: 200;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2); display: none;
+  }
+  #toast.show { display: block; }
+  #toast.error { background: var(--danger); }
   .modal {
     background: var(--surface);
     border-radius: 12px;
@@ -457,7 +470,7 @@
         <div class="field-row full" id="quantity-row">
           <div>
             <label for="quantity" data-i18n="labelQuantity">Quantity owned</label>
-            <input type="number" id="quantity" min="0" value="1" style="max-width:120px;" />
+            <input type="number" id="quantity" min="0" step="1" value="1" style="max-width:120px;" />
           </div>
         </div>
       </fieldset>
@@ -562,7 +575,19 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+<div class="overlay" id="confirm-overlay">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-describedby="confirm-message">
+    <p id="confirm-message"></p>
+    <div class="modal-actions">
+      <button type="button" id="confirm-cancel" data-i18n="cancel">Cancel</button>
+      <button type="button" id="confirm-ok" class="danger"></button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
 <script>
 const SUPABASE_URL = "https://azcxjupcdiqihpebzxed.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_D-tianWsCO9XYZja_zAPZQ_wsHBwag5";
@@ -649,9 +674,12 @@ const translations = {
     rejectedBadge: "Not added to the master catalog",
     mineEmptyState: "You haven't added any tokens to your collection yet.",
     reviewEmptyState: "No submissions waiting for review.",
+    invalidQuantity: "Quantity must be a whole number, 0 or more.",
+    loadError: "Couldn't load data. Please try again.",
     signInRequired: "Sign in to build your own collection.",
     authErrorGeneric: "Something went wrong. Check your email and password and try again.",
     signUpCheckEmail: "Check your email to confirm your account, then sign in.",
+    withdraw: "Withdraw",
     confirmWithdraw: "Withdraw this submission from your collection?",
     confirmReject: "Reject this submission?",
     labelPersonalNotes: "Personal notes (only you see this)"
@@ -731,9 +759,12 @@ const translations = {
     rejectedBadge: "No se agregó al catálogo maestro",
     mineEmptyState: "Aún no has agregado boletos a tu colección.",
     reviewEmptyState: "No hay envíos pendientes de revisión.",
+    invalidQuantity: "La cantidad debe ser un número entero, 0 o más.",
+    loadError: "No se pudieron cargar los datos. Inténtalo de nuevo.",
     signInRequired: "Inicia sesión para crear tu propia colección.",
     authErrorGeneric: "Algo salió mal. Revisa tu correo y contraseña e intenta de nuevo.",
     signUpCheckEmail: "Revisa tu correo para confirmar tu cuenta y luego inicia sesión.",
+    withdraw: "Retirar",
     confirmWithdraw: "¿Retirar este envío de tu colección?",
     confirmReject: "¿Rechazar este envío?",
     labelPersonalNotes: "Notas personales (solo tú las ves)"
@@ -741,6 +772,55 @@ const translations = {
 };
 
 let lang = localStorage.getItem(LANG_KEY) || (navigator.language && navigator.language.toLowerCase().indexOf("es") === 0 ? "es" : "en");
+
+// Promise-based replacement for confirm(). Resolves true on confirm, false on cancel/Escape/backdrop.
+// Focus starts on Cancel since every caller is destructive.
+function confirmDialog(message, confirmLabel) {
+  const overlay = document.getElementById("confirm-overlay");
+  const okBtn = document.getElementById("confirm-ok");
+  const cancelBtn = document.getElementById("confirm-cancel");
+  const previousFocus = document.activeElement;
+  document.getElementById("confirm-message").textContent = message;
+  okBtn.textContent = confirmLabel;
+  overlay.classList.add("open");
+  cancelBtn.focus();
+  return new Promise(function (resolve) {
+    function finish(result) {
+      overlay.classList.remove("open");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey, true);
+      if (previousFocus && previousFocus.focus) previousFocus.focus();
+      resolve(result);
+    }
+    function onOk() { finish(true); }
+    function onCancel() { finish(false); }
+    function onBackdrop(e) { if (e.target === overlay) finish(false); }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === "Tab") {
+        e.preventDefault();
+        (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+      }
+    }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    overlay.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey, true);
+  });
+}
+
+let toastTimer = null;
+// Non-blocking replacement for alert(). kind: "error" (default) or "info".
+function showToast(message, kind, duration) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.className = "show" + (kind === "info" ? "" : " error");
+  el.setAttribute("role", kind === "info" ? "status" : "alert");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { el.className = ""; }, duration || 6000);
+}
 
 function t(key) {
   return translations[lang][key] != null ? translations[lang][key] : translations.en[key];
@@ -899,6 +979,7 @@ let currentUser = null;
 let isAdmin = false;
 let currentView = "catalog";
 let records = [];
+let loadError = false;
 let photoData = { obverse: null, reverse: null };
 let currentDraftId = null;
 let matchCandidates = [];
@@ -986,19 +1067,22 @@ function normalizeCollectionItem(item) {
 
 const VIEW_LOADERS = {
   catalog: async function () {
-    const { data } = await sb.from("token_types").select("*").order("hacienda_name");
+    const { data, error } = await sb.from("token_types").select("*").order("hacienda_name");
+    if (error) throw error;
     records = (data || []).map(normalizeTokenType);
   },
   mine: async function () {
     if (!currentUser) { records = []; return; }
-    const { data } = await sb.from("user_collection_items")
+    const { data, error } = await sb.from("user_collection_items")
       .select("*, token_types(*), token_type_submissions(*)")
       .eq("user_id", currentUser.id);
+    if (error) throw error;
     records = (data || []).map(normalizeCollectionItem);
   },
   review: async function () {
     if (!isAdmin) { records = []; return; }
-    const { data } = await sb.from("token_type_submissions").select("*").eq("status", "pending").order("created_at");
+    const { data, error } = await sb.from("token_type_submissions").select("*").eq("status", "pending").order("created_at");
+    if (error) throw error;
     records = (data || []).map(normalizeSubmission);
   }
 };
@@ -1011,7 +1095,14 @@ async function setView(view) {
   document.getElementById("stats").style.display = view === "review" ? "none" : "grid";
   document.getElementById("btn-add").style.display = (view === "mine" && currentUser) ? "inline-block" : "none";
   document.getElementById("search").value = "";
-  await VIEW_LOADERS[view]();
+  loadError = false;
+  try {
+    await VIEW_LOADERS[view]();
+  } catch (err) {
+    console.error(err);
+    records = [];
+    loadError = true;
+  }
   render();
 }
 
@@ -1050,17 +1141,17 @@ document.getElementById("auth-form").addEventListener("submit", async function (
   const email = document.getElementById("auth-email").value.trim();
   const password = document.getElementById("auth-password").value;
   const { error } = await sb.auth.signInWithPassword({ email: email, password: password });
-  if (error) { alert(t("authErrorGeneric")); return; }
+  if (error) { showToast(t("authErrorGeneric")); return; }
   document.getElementById("auth-form").reset();
 });
 
 document.getElementById("btn-sign-up").addEventListener("click", async function () {
   const email = document.getElementById("auth-email").value.trim();
   const password = document.getElementById("auth-password").value;
-  if (!email || !password) { alert(t("authErrorGeneric")); return; }
+  if (!email || !password) { showToast(t("authErrorGeneric")); return; }
   const { error } = await sb.auth.signUp({ email: email, password: password });
-  if (error) { alert(t("authErrorGeneric")); return; }
-  alert(t("signUpCheckEmail"));
+  if (error) { showToast(t("authErrorGeneric")); return; }
+  showToast(t("signUpCheckEmail"), "info");
   document.getElementById("auth-form").reset();
 });
 
@@ -1292,23 +1383,25 @@ function readFormFields() {
   };
 }
 
+// Empty input defaults to 1; returns null for anything that isn't a whole number >= 0.
+function readQuantity() {
+  const raw = document.getElementById("quantity").value.trim();
+  if (raw === "") return 1;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 async function submitAsNew(fields, quantity) {
   const submissionId = currentDraftId || crypto.randomUUID();
-  const payload = Object.assign({}, fields, {
-    id: submissionId,
-    submitted_by: currentUser.id,
-    status: "pending",
+  const photos = {
     photo_obverse_path: photoData.obversePath || null,
     photo_reverse_path: photoData.reversePath || null
+  };
+  const { error } = await sb.rpc("submit_new_token_type", {
+    p_submission: Object.assign({}, fields, photos, { id: submissionId }),
+    p_quantity: quantity
   });
-  const { error: subError } = await sb.from("token_type_submissions").insert(payload);
-  if (subError) { alert(subError.message); return; }
-  const { error: itemError } = await sb.from("user_collection_items").insert({
-    user_id: currentUser.id,
-    submission_id: submissionId,
-    quantity: quantity
-  });
-  if (itemError) { alert(itemError.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   closeMatchOverlay();
   await setView("mine");
@@ -1321,7 +1414,7 @@ async function linkToExisting(tokenTypeId, quantity, personalNotes) {
     quantity: quantity,
     personal_notes: personalNotes || null
   });
-  if (error) { alert(error.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   closeMatchOverlay();
   await setView("mine");
@@ -1351,7 +1444,8 @@ function showMatchOverlay(candidates, draftFields, quantity) {
 
 async function handleAddSubmit() {
   const fields = readFormFields();
-  const quantity = document.getElementById("quantity").value ? parseInt(document.getElementById("quantity").value, 10) : 1;
+  const quantity = readQuantity();
+  if (quantity === null) { showToast(t("invalidQuantity")); return; }
   const query = [fields.hacienda_name, fields.denomination, fields.material].filter(Boolean).join(" ");
   const { data: matches } = await sb.rpc("match_token_types", { query: query });
   if (matches && matches.length) {
@@ -1363,19 +1457,20 @@ async function handleAddSubmit() {
 
 async function handleEditMineSubmit() {
   const record = activeRecord;
-  const quantity = document.getElementById("quantity").value ? parseInt(document.getElementById("quantity").value, 10) : 1;
+  const quantity = readQuantity();
+  if (quantity === null) { showToast(t("invalidQuantity")); return; }
   if (record.pending) {
     const fields = readFormFields();
     if (photoData.obversePath) fields.photo_obverse_path = photoData.obversePath;
     if (photoData.reversePath) fields.photo_reverse_path = photoData.reversePath;
     const { error: subErr } = await sb.from("token_type_submissions").update(fields).eq("id", record.submissionId);
-    if (subErr) { alert(subErr.message); return; }
+    if (subErr) { showToast(subErr.message); return; }
     const { error: itemErr } = await sb.from("user_collection_items").update({ quantity: quantity }).eq("id", record.collectionItemId);
-    if (itemErr) { alert(itemErr.message); return; }
+    if (itemErr) { showToast(itemErr.message); return; }
   } else {
     const personalNotes = document.getElementById("notes").value.trim();
     const { error } = await sb.from("user_collection_items").update({ quantity: quantity, personal_notes: personalNotes }).eq("id", record.collectionItemId);
-    if (error) { alert(error.message); return; }
+    if (error) { showToast(error.message); return; }
   }
   closeModal();
   await setView("mine");
@@ -1390,11 +1485,9 @@ document.getElementById("record-form").addEventListener("submit", async function
 document.getElementById("btn-delete").addEventListener("click", async function () {
   const record = activeRecord;
   if (!record) return;
-  if (!confirm(record.pending ? t("confirmWithdraw") : t("confirmDelete"))) return;
-  await sb.from("user_collection_items").delete().eq("id", record.collectionItemId);
-  if (record.pending && record.submissionId) {
-    await sb.from("token_type_submissions").delete().eq("id", record.submissionId);
-  }
+  if (!(await confirmDialog(record.pending ? t("confirmWithdraw") : t("confirmDelete"), record.pending ? t("withdraw") : t("delete")))) return;
+  const { error } = await sb.rpc("withdraw_collection_item", { p_item_id: record.collectionItemId });
+  if (error) { showToast(error.message); return; }
   closeModal();
   await setView("mine");
 });
@@ -1404,7 +1497,7 @@ document.getElementById("btn-approve").addEventListener("click", async function 
   if (!record) return;
   const overrides = readFormFields();
   const { error } = await sb.rpc("approve_submission", { p_submission_id: record.id, overrides: overrides });
-  if (error) { alert(error.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   await setView("review");
   await refreshReviewBadge();
@@ -1413,10 +1506,10 @@ document.getElementById("btn-approve").addEventListener("click", async function 
 document.getElementById("btn-reject").addEventListener("click", async function () {
   const record = activeRecord;
   if (!record) return;
-  if (!confirm(t("confirmReject"))) return;
+  if (!(await confirmDialog(t("confirmReject"), t("reject")))) return;
   const note = document.getElementById("review-note").value.trim();
   const { error } = await sb.rpc("reject_submission", { p_submission_id: record.id, p_note: note || null });
-  if (error) { alert(error.message); return; }
+  if (error) { showToast(error.message); return; }
   closeModal();
   await setView("review");
   await refreshReviewBadge();
@@ -1513,7 +1606,7 @@ function render() {
   const emptyText = document.getElementById("empty-state-text");
 
   if (records.length === 0) {
-    emptyText.textContent = currentView === "mine" ? t("mineEmptyState") : currentView === "review" ? t("reviewEmptyState") : t("emptyState");
+    emptyText.textContent = loadError ? t("loadError") : currentView === "mine" ? t("mineEmptyState") : currentView === "review" ? t("reviewEmptyState") : t("emptyState");
     emptyState.style.display = "block";
     grid.innerHTML = "";
     return;

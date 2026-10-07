@@ -9,8 +9,13 @@ CSS + vanilla JS, no build step, no framework).
 - **No bundler/framework** — plain HTML/CSS/JS in `index.html`. Open it directly in a
   browser or serve it as a static file.
 - **Backend: Supabase** (see script tag near line 565, client init ~line 567-570).
-  The anon key is embedded client-side (expected for Supabase's public/anon key model —
+  The publishable/anon key is embedded client-side (expected for Supabase's public key model —
   access control is enforced via Supabase row-level security policies, not by hiding the key).
+- **Admin:** a single hardcoded `ADMIN_UID` constant (~line 568) drives `isAdmin`, which only
+  gates the UI (Review tab, badge). **Real enforcement must live server-side** (RLS +
+  the RPCs below). Those SQL definitions are not in this repo — verify them in Supabase.
+- **Supabase RPCs used:** `match_token_types(query)` (duplicate matching before a submission),
+  `approve_submission(p_submission_id, overrides)`, `reject_submission(p_submission_id, p_note)`.
 - **Tables used:**
   - `token_types` — the catalog of known boleto/token types (hacienda name, etc.)
   - `user_collection_items` — a signed-in user's personal collection (quantity,
@@ -27,7 +32,9 @@ CSS + vanilla JS, no build step, no framework).
 
 - Browse/search/sort the full token catalog; stats bar (total tokens, haciendas count).
 - "My collection" view — signed-in users track owned tokens with quantity + notes.
-- "Review queue" — pending user submissions of new token types, with a badge count.
+- Adding a token: the form first calls `match_token_types`; the user can link to an existing
+  token type or submit a new one (`status = "pending"`).
+- "Review queue" (admin only) — pending submissions with a badge count; approve/reject via RPCs.
 - Export catalog/collection as JSON and CSV.
 - Photo upload for token submissions, stored in Supabase Storage.
 
@@ -37,9 +44,34 @@ CSS + vanilla JS, no build step, no framework).
   `id="..."` or function name first rather than reading the whole file (it exceeds
   typical single-read size limits).
 - No test suite or build/lint tooling currently exists.
+- **Error handling conventions:** view loaders in `VIEW_LOADERS` throw on Supabase errors;
+  `setView` catches, sets `loadError`, and `render()` shows the localized `loadError`
+  message in the empty-state area. Writes check the `error` result and report failures with `showToast(msg, kind, duration)`
+  (non-blocking `#toast`; kind `"error"` default or `"info"`) — don't use `alert()`.
+  Destructive confirmations use `await confirmDialog(message, confirmLabel)` (`#confirm-overlay`;
+  resolves true/false; Escape/backdrop cancel, focus starts on Cancel) — don't use `confirm()`.
+- **i18n:** add every new user-facing string to *both* `en` and `es` in `translations`.
 - No `.env`/config file — Supabase URL and anon key are hardcoded constants near the
   top of the `<script>` block.
 
 ## Status
 
-Initial commit only (`e03086a`) as of 2026-07-14. No further history yet.
+Initial commit `e03086a` (2026-07-14).
+
+Session 3 (2026-10-07): re-implemented the lost Session 2 fixes in `index.html`:
+- View loaders throw on Supabase errors; `setView` sets `loadError` and `render()` shows the localized message.
+- Adding a new token and withdraw/delete are single atomic RPC calls (`submit_new_token_type`, `withdraw_collection_item`); the old client-side rollback/fallback code was removed.
+- Quantity is validated by `readQuantity()` (empty → 1; must be a whole number ≥ 0, else toast `invalidQuantity`). The DB should also enforce this with a CHECK constraint on `user_collection_items.quantity`.
+- All `alert()` calls replaced by `showToast()` (`#toast`, `aria-live`, auto-dismiss); all `confirm()` calls replaced by `confirmDialog()`.
+
+## Known issues / next steps
+
+- Confirm `approve_submission` / `reject_submission` and RLS on `token_type_submissions`,
+  `user_collection_items`, and `boleto-photos` verify the caller server-side (not just `ADMIN_UID` in JS).
+  Draft target state in `sql/rls_and_authz.sql` (admins table + `is_admin()`, per-table policies,
+  column-level update grants, admin-checked approve/reject, storage policies). **Not deployed** — it was
+  written without seeing the live policies/RPC bodies; run its audit section first.
+- **Requires `sql/atomic_writes.sql` to be deployed:** `submitAsNew` and the delete/withdraw handler call
+  the `submit_new_token_type` / `withdraw_collection_item` RPCs with no fallback. Without the functions in
+  Supabase, adding and withdrawing tokens fails with an error toast.
+- Supabase JS is pinned to `2.117.3` (jsDelivr, no SRI hash yet — add `integrity`/`crossorigin` after computing the hash from a machine that can reach the CDN). Bump deliberately and re-test.
